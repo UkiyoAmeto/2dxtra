@@ -106,6 +106,8 @@ struct offsets
     std::uint8_t* PLAY_SESSION;             // bm2dx::play_session_t
     std::uint8_t* DEAD_STATE;               // bm2dx::dead_state_t
     std::uint8_t* HI_SPEED_STATE;           // native scroll-speed singleton
+    std::uint8_t* D3D9_MANAGER_PTR;         // manager singleton whose +0xe0 is the IDirect3DDevice9*, when
+                                            // D3D9_DEVICE is not a fixed address (33rd gen and older leave it null)
 };
 
 auto inline resolve_offsets(std::uint8_t* base) -> std::optional<offsets>
