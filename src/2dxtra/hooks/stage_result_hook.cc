@@ -3,6 +3,7 @@
 #include "../score_set.h"
 #include "../features/timing_histogram.h"
 #include "chart_load_hook.h"
+#include "../diag.h"
 #include "stage_result_hook.h"
 
 namespace iidxtra::stage_result_hook
@@ -29,6 +30,18 @@ namespace iidxtra::stage_result_hook
 
 		if (game_score == nullptr || difficulty < 0 || difficulty >= 5)
 			return;
+
+		// One-shot sample of what the score table really contains, so a wrong
+		// table base shows up in 2dxtra.log instead of silently corrupting data.
+		auto static sampled = 0;
+		if (sampled < 4)
+		{
+			diag::write("result sample p%d style %d music %u diff %d: score %d miss %d clear %d populated %d",
+				player, static_cast<int>(style), music_id, difficulty,
+				game_score->score[difficulty], game_score->miss[difficulty],
+				game_score->clear[difficulty], game_score->is_populated);
+			++sampled;
+		}
 
 		target.clear[player] = game_score->clear[difficulty];
 		target.miss[player] = game_score->miss[difficulty];

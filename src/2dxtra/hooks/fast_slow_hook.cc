@@ -134,6 +134,11 @@ namespace iidxtra::fast_slow_hook
     // Determines if a user has separated fast/slow display option enabled.
     auto separate_scratch(const int player) -> bool
     {
+        // Not every supported build exposes this option accessor yet; fall back
+        // to the combined display when it is missing.
+        if (bm2dx::addr->IS_SEPARATE_SCRATCH_FN == nullptr)
+            return false;
+
         const auto is_separate = reinterpret_cast<separate_scratch_t>(bm2dx::addr->IS_SEPARATE_SCRATCH_FN);
         return is_separate(nullptr, player) == 1;
     }
@@ -166,8 +171,14 @@ namespace iidxtra::fast_slow_hook
         // a tick fixes that.
         if (options.show_milliseconds && timing.measured && bm2dx::config)
         {
-            const float tick_rate = bm2dx::config->monitor_check_fps;
-            // Being really defensive here due to various timing patches
+            auto tick_rate = bm2dx::config->monitor_check_fps;
+
+            // The 34th-gen build reports 1.0 here until its monitor check runs;
+            // fall back to the target frame rate when the value cannot be a
+            // refresh rate, otherwise the half-tick shift would be seconds.
+            if (!std::isfinite(tick_rate) || tick_rate < 30.0f)
+                tick_rate = static_cast<float>(bm2dx::config->target_fps);
+
             if (std::isfinite(tick_rate) && tick_rate > 0.0f)
                 timing.milliseconds -= (1000.0f / tick_rate) * 0.5f;
         }

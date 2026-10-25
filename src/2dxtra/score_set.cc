@@ -32,6 +32,10 @@ namespace iidxtra::score_set
 
 	auto init() -> bool
 	{
+		// Without a score table in the game build there is nothing to swap.
+		if (bm2dx::scores[0] == nullptr || bm2dx::scores[1] == nullptr)
+			return false;
+
 		auto const alloc = [] (std::size_t size)
 			{ return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size); };
 
@@ -74,13 +78,17 @@ namespace iidxtra::score_set
 		if (bm2dx::state->p1_active)
 		{
 			CopyMemory(stock_p1, bm2dx::scores[0], bm2dx::player_scores_size());
-			CopyMemory(stock_rivals_p1, bm2dx::rival_scores[0], bm2dx::rival_scores_size());
+
+			if (bm2dx::rival_scores[0] != nullptr)
+				CopyMemory(stock_rivals_p1, bm2dx::rival_scores[0], bm2dx::rival_scores_size());
 		}
 
 		if (bm2dx::state->p2_active)
 		{
 			CopyMemory(stock_p2, bm2dx::scores[1], bm2dx::player_scores_size());
-			CopyMemory(stock_rivals_p2, bm2dx::rival_scores[1], bm2dx::rival_scores_size());
+
+			if (bm2dx::rival_scores[1] != nullptr)
+				CopyMemory(stock_rivals_p2, bm2dx::rival_scores[1], bm2dx::rival_scores_size());
 		}
 	}
 
@@ -121,13 +129,17 @@ namespace iidxtra::score_set
 			if (bm2dx::state->p1_active)
 			{
 				CopyMemory(bm2dx::scores[0], stock_p1, bm2dx::player_scores_size());
-				CopyMemory(bm2dx::rival_scores[0], stock_rivals_p1, bm2dx::rival_scores_size());
+
+				if (bm2dx::rival_scores[0] != nullptr)
+					CopyMemory(bm2dx::rival_scores[0], stock_rivals_p1, bm2dx::rival_scores_size());
 			}
 
 			if (bm2dx::state->p2_active)
 			{
 				CopyMemory(bm2dx::scores[1], stock_p2, bm2dx::player_scores_size());
-				CopyMemory(bm2dx::rival_scores[1], stock_rivals_p2, bm2dx::rival_scores_size());
+
+				if (bm2dx::rival_scores[1] != nullptr)
+					CopyMemory(bm2dx::rival_scores[1], stock_rivals_p2, bm2dx::rival_scores_size());
 			}
 
 			return;
@@ -136,8 +148,12 @@ namespace iidxtra::score_set
 		// Clear all stock scores in advance, rather than X times.
 		ZeroMemory(bm2dx::scores[0], bm2dx::player_scores_size());
 		ZeroMemory(bm2dx::scores[1], bm2dx::player_scores_size());
-		ZeroMemory(bm2dx::rival_scores[0], bm2dx::rival_scores_size());
-		ZeroMemory(bm2dx::rival_scores[1], bm2dx::rival_scores_size());
+
+		if (bm2dx::rival_scores[0] != nullptr)
+			ZeroMemory(bm2dx::rival_scores[0], bm2dx::rival_scores_size());
+
+		if (bm2dx::rival_scores[1] != nullptr)
+			ZeroMemory(bm2dx::rival_scores[1], bm2dx::rival_scores_size());
 
 		auto& set = chart_set::custom.at(chart_set::active);
 		auto const active_player = bm2dx::state->p1_active ? 0: 1;
@@ -200,3 +216,4 @@ namespace iidxtra::score_set
 		}
 	}
 }
+

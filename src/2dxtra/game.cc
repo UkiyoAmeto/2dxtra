@@ -42,7 +42,16 @@ namespace bm2dx
 		if (addr->MAX_ENTRIES == 0)
 			return false;
 
+		if (addr->GET_APP_CONFIG == nullptr || addr->GAME_MODEL == nullptr)
+			return false;
+
 		config = reinterpret_cast<CApplicationConfig* (*) ()>(addr->GET_APP_CONFIG)();
+
+		// The app manager is only built once the game's own initialisation has
+		// run; if the hook DLL is loaded earlier the accessor returns a bogus
+		// near-null pointer. Drop it instead of dereferencing garbage later.
+		if (reinterpret_cast<std::uintptr_t>(config) < 0x10000)
+			config = nullptr;
 		state = reinterpret_cast<state_t*>(addr->GAME_STATE);
 		input_manager = reinterpret_cast<InputManagerIIDX*>(addr->INPUT_MANAGER);
 		play_state = reinterpret_cast<play_state_t*>(addr->PLAY_STATE);
@@ -98,11 +107,35 @@ namespace bm2dx
 		return reinterpret_cast<music_entry_t*>(table + max_entries() * sizeof(std::int32_t));
 	}
 
+	auto d3d9_device() -> void**
+	{
+		if (!addr.has_value())
+			return nullptr;
+
+		if (addr->D3D9_DEVICE != nullptr)
+			return reinterpret_cast<void**>(addr->D3D9_DEVICE);
+
+		// Later builds construct the renderer/app manager on the heap: the
+		// static only holds a pointer to it, and the device lives at +0xe0.
+		if (addr->D3D9_MANAGER_PTR != nullptr)
+		{
+			auto const manager = *reinterpret_cast<std::uint8_t**>(addr->D3D9_MANAGER_PTR);
+
+			if (manager != nullptr)
+				return reinterpret_cast<void**>(manager + 0xe0);
+		}
+
+		return nullptr;
+	}
+
 	auto set_soft_rev(std::uint8_t rev) -> void
 	{
 		addr->GAME_MODEL[8] = rev;
 
 #ifdef NDEBUG
+		if (addr->SOFT_REV_PATCH == nullptr)
+			return;
+
 		// required for propagating to network calls
 		std::uint8_t bytes[] = { 0xC6, 0x47, 0x05, rev, // mov byte ptr [rdi+05], 45 ('E')
 			                     0x90 };                // nop

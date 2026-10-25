@@ -2,6 +2,8 @@
 #include <meta.h>
 #include <MinHook.h>
 #include "../log.h"
+#include "../diag.h"
+#include <cstring>
 #include "../game.h"
 #include "../chart_set.h"
 #include "mdata_load_hook.h"
@@ -18,6 +20,12 @@ namespace iidxtra::mdata_load_hook
 
 		if (music_data == nullptr)
 			return;
+
+		auto const magic = std::memcmp(music_data, "IIDX", 4) == 0;
+		diag::write("music_data %p magic %s entries %d occupied %d max_entries %#zx",
+			static_cast<const void*>(music_data), magic ? "IIDX" : "MISMATCH",
+			static_cast<int>(music_data->entries), music_data->occupied_entries,
+			bm2dx::max_entries());
 
 		// Reserve memory for the amount of occupied entries in advance.
 		chart_set::stock.music.reserve(music_data->occupied_entries);
@@ -68,7 +76,16 @@ namespace iidxtra::mdata_load_hook
 			populate_default_set();
 
 			// Step 2: Update logger framerate.
-			log::base_framerate = bm2dx::config->target_fps;
+			if (bm2dx::config != nullptr)
+			{
+				log::base_framerate = bm2dx::config->target_fps;
+				diag::write("probe(late): config target_fps %u monitor_check_fps %.2f",
+					bm2dx::config->target_fps, static_cast<double>(bm2dx::config->monitor_check_fps));
+			}
+			else
+			{
+				diag::write("probe(late): config is null");
+			}
 
 			// Step 3: Print some post-init text.
 			log::init("Welcome to 2dxtra! (v{} - by aixxe)", VERSION_STRING);

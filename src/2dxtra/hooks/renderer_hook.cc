@@ -20,6 +20,17 @@ namespace iidxtra::renderer_hook
 
     auto present_hook_fn(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* dst, HWND dst_wnd, const RGNDATA* dirty_region, DWORD flags) -> HRESULT
     {
+        // The device can move (or appear later) on newer builds, so re-resolve
+        // it whenever the cached pointer is still empty.
+        if (device_ptr == nullptr)
+        {
+            if (auto const slot = bm2dx::d3d9_device())
+                device_ptr = *reinterpret_cast<IDirect3DDevice9**>(slot);
+        }
+
+        if (device_ptr == nullptr)
+            return original_present_fn(swapchain, src, dst, dst_wnd, dirty_region, flags);
+
         std::call_once(init_once, gui::init);
 
         if (SUCCEEDED(device_ptr->BeginScene()))
@@ -57,7 +68,15 @@ namespace iidxtra::renderer_hook
 			set_renderer_freeze(true);
         #endif
 
-        device_ptr = *reinterpret_cast<IDirect3DDevice9**>(bm2dx::addr->D3D9_DEVICE);
+        auto const device_slot = bm2dx::d3d9_device();
+
+        if (device_slot == nullptr)
+            return;
+
+        device_ptr = *reinterpret_cast<IDirect3DDevice9**>(device_slot);
+
+        if (device_ptr == nullptr)
+            return;
 
         if (device_ptr->GetSwapChain(0, &swapchain_ptr) != D3D_OK)
             return;

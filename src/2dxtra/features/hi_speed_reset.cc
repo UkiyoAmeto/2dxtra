@@ -65,7 +65,10 @@ namespace iidxtra::hi_speed_reset
 
     auto install_hook() -> void
     {
-        start_hook = safetyhook::create_mid(bm2dx::addr->HI_SPEED_RESET_PATCH, double_start);
-        adjustment_hook = safetyhook::create_mid(bm2dx::addr->HI_SPEED_ADJUST_CALL, adjust);
+        if (bm2dx::addr->HI_SPEED_RESET_PATCH != nullptr)
+            start_hook = safetyhook::create_mid(bm2dx::addr->HI_SPEED_RESET_PATCH, double_start);
+
+        if (bm2dx::addr->HI_SPEED_ADJUST_CALL != nullptr)
+            adjustment_hook = safetyhook::create_mid(bm2dx::addr->HI_SPEED_ADJUST_CALL, adjust);
     }
 }

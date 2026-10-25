@@ -36,6 +36,7 @@ find_path(RUBBERBAND_INCLUDE_DIR rubberband/RubberBandStretcher.h REQUIRED)
 set(SOURCE_FILES
     src/2dxtra/api.cc
     src/2dxtra/log.cc
+    src/2dxtra/diag.cc
     src/2dxtra/init.cc
     src/2dxtra/game.cc
     src/2dxtra/input.cc

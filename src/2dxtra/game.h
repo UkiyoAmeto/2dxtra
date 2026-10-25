@@ -438,4 +438,8 @@ namespace bm2dx
 	// state setup
 	auto resolve() -> bool;
 	auto set_soft_rev(std::uint8_t rev) -> void;
+
+	// Address of the game's IDirect3DDevice9* pointer. Builds that do not keep
+	// the device at a fixed address resolve it through the app manager.
+	auto d3d9_device() -> void**;
 }
