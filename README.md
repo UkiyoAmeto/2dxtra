@@ -14,3 +14,15 @@ A multi-hack for arcade beatmania IIDX
 - Novelty modes to combine notes, re-arrange keysounds & swap scratches
 - Includes an updated version of [2dxAutoRetry](https://github.com/aixxe/2dxAutoRetry) with additional options
 - Ability to increase or decrease each judgement timing window
+
+## Supported versions
+
+2dxtra only loads when `bm2dx.dll` matches one of the supported builds. The match is exact on the PE header triple (`SizeOfCode` / `AddressOfEntryPoint` / `SizeOfImage`):
+
+| Generation | Version | `SizeOfCode` | `AddressOfEntryPoint` | `SizeOfImage` |
+|---|---|---|---|---|
+| IIDX 33 | `2026081900-010` | `0x0C8F800` | `0x0B1CCCC` | `0x0BB95000` |
+| IIDX 33 | `2026081900-012` | `0x0BC0A00` | `0x0A4FD5C` | `0x0BA81000` |
+| IIDX 34 | `2026091600-010` | `0x00C64200` | `0x00B02B3C` | `0x0C5FF000` |
+
+The IIDX 34 entry targets the `010-20260916` build (the game reports build id `2026091700`). Supporting another build means adding one file under `src/2dxtra/offsets/`; see `docs/2026091600-010.md` for the method.
