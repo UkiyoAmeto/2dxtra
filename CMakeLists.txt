@@ -87,6 +87,7 @@ set(SOURCE_FILES
     src/2dxtra/features/timing_modifier.cc
     src/2dxtra/features/fast_slow_display.cc
     src/2dxtra/features/timing_histogram.cc
+    src/2dxtra/features/play_stats.cc
     src/2dxtra/features/autoretry.cc
     src/2dxtra/features/hi_speed_reset.cc
     res/2dxtra.def

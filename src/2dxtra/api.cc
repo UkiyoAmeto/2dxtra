@@ -15,6 +15,8 @@ auto Score_Set(const char* id, std::uint8_t player, std::int32_t clear, std::int
 	iidxtra::score_set::custom[id].clear[player] = clear;
 	iidxtra::score_set::custom[id].miss[player] = miss;
 	iidxtra::score_set::custom[id].score[player] = score;
+
+	iidxtra::score_set::persist(id, player);
 }
 
 auto Score_Clear() -> void
@@ -28,6 +30,8 @@ auto Score_SetRival(const char* id, std::uint8_t rival, std::int32_t clear, std:
 	iidxtra::score_set::custom_rivals[rival][id].clear = clear;
 	iidxtra::score_set::custom_rivals[rival][id].miss = miss;
 	iidxtra::score_set::custom_rivals[rival][id].score = score;
+
+	iidxtra::score_set::persist_rival(id, rival);
 }
 
 auto Score_ClearRival() -> void

@@ -10,6 +10,7 @@
 #include "../game.h"
 #include "../judgment.h"
 #include "../features/fast_slow_display.h"
+#include "../features/play_stats.h"
 #include "../features/timing_histogram.h"
 #include "fast_slow_hook.h"
 
@@ -190,6 +191,10 @@ namespace iidxtra::fast_slow_hook
     auto judge_apply_hook_fn(void* context, const int player, const int grade,
                              const int lane, const int score_index) -> int
     {
+        // Count every judgment so scores of failed plays can be recorded even
+        // though the game never writes them to its own score table.
+        play_stats::on_judge(player, grade);
+
 #ifdef _MSC_VER
         const auto caller = static_cast<std::uint8_t*>(_ReturnAddress());
 #else
@@ -245,6 +250,10 @@ namespace iidxtra::fast_slow_hook
 
             // call into the original judgment apply function
             const auto result = original_judge_apply_fn(context, player, grade, lane, score_index);
+
+            // The game updates the EX score inside the call above.
+            play_stats::sample_score(player);
+
             pending = saved_pending;
             return result;
         }

@@ -25,6 +25,9 @@ namespace iidxtra::chart_analyze_hook
         constexpr std::size_t V22_SIZE = DIFF_STRIDE * DIFF_COUNT;
         constexpr std::size_t NOTE_OFFSET_IN_REC = 4 + 8;
 
+        // Kiraku, Kichiku, All-Scratch, Kichiku+All-Scratch, Kiraku+All-Scratch.
+        constexpr int CHART_SET_COUNT = 5;
+
         // The 10 analyze-gate bytes are the contiguous u8 rating fields of
         // music_entry_t (SPB..SPL, padding, DPN..DPL); index 5 is the padding
         // byte, always zero (invalid).
@@ -76,10 +79,37 @@ namespace iidxtra::chart_analyze_hook
             if (!g_mutate)
                 return;
 
-            auto const written = g_mutate_mode == 2
-                ? all_scratch::convert_in_place(buf, SCRATCH_CAPACITY)
-                : urafumen::convert_in_place(
+            // Mode 0 = Kiraku, 1 = Kichiku, 2 = All-Scratch,
+            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch.
+            auto written = std::size_t { 0 };
+
+            if (g_mutate_mode == 2)
+            {
+                written = all_scratch::convert_in_place(buf, SCRATCH_CAPACITY);
+            }
+            else if (g_mutate_mode == 3 || g_mutate_mode == 4)
+            {
+                // Generate the Kichiku or Kiraku chart first, then re-shuffle
+                // the result onto the turntable.
+                written = urafumen::convert_in_place(
+                    buf, SCRATCH_CAPACITY, /*player=*/0, g_mutate_mode == 3);
+
+                if (written > 0)
+                {
+                    auto const scratched =
+                        all_scratch::convert_in_place(buf, SCRATCH_CAPACITY);
+
+                    // On failure the buffer is left untouched, so keeping the
+                    // Kichiku/Kiraku output is the better fallback.
+                    if (scratched > 0)
+                        written = scratched;
+                }
+            }
+            else
+            {
+                written = urafumen::convert_in_place(
                     buf, SCRATCH_CAPACITY, /*player=*/0, g_mutate_mode == 1);
+            }
 
             if (written > 0)
             {
@@ -204,7 +234,9 @@ namespace iidxtra::chart_analyze_hook
                 valid_diffs.push_back({ d, rank, oh });
             }
 
-            for (int mode = 0; mode < 3; ++mode)
+            // Mode 0 = Kiraku, 1 = Kichiku, 2 = All-Scratch,
+            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch.
+            for (int mode = 0; mode < CHART_SET_COUNT; ++mode)
             {
                 std::vector<database::chart_row> cached(DIFF_COUNT);
                 std::vector<bool> is_cached(DIFF_COUNT, false);
@@ -296,7 +328,14 @@ namespace iidxtra::chart_analyze_hook
             return;
 
         // An empty chart cache means this boot performs the full (slow) build.
+        // A set that has never been built (for example a set added by a newer
+        // version) triggers the build text as well.
         g_needs_build = database::chart_count(g_db) == 0;
+
+        for (int set = 0; set < CHART_SET_COUNT && !g_needs_build; ++set)
+            if (database::chart_set_count(g_db, set) == 0)
+                g_needs_build = true;
+
         if (g_needs_build)
             g_init_text_hook = safetyhook::create_inline(
                 bm2dx::addr->INIT_TEXT_RENDER_FN,

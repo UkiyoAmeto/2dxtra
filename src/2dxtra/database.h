@@ -11,7 +11,8 @@ namespace database
 {
     struct chart_row
     {
-        int chart_set; // 0=Kiraku, 1=Kichiku
+        int chart_set; // 0=Kiraku, 1=Kichiku, 2=All-Scratch,
+                       // 3=Kichiku+All-Scratch, 4=Kiraku+All-Scratch
         int music_id;
         int difficulty; // 0..9 (loader chart index)
         std::string hash; // sha256 of the mutated chart (also its id)
@@ -24,6 +25,18 @@ namespace database
     {
         std::string   hash;
         std::uint32_t notes;
+    };
+
+    // A score archived for a special chart, keyed by its chart hash.
+    // `player` is the player index (0/1) for local scores and the rival
+    // index (0..5) for rival scores.
+    struct score_row
+    {
+        std::string hash;
+        int player;
+        int clear;
+        int miss;
+        int score;
     };
 
     struct db;
@@ -40,7 +53,14 @@ namespace database
     auto charts_for_set(db*, int chart_set) -> std::vector<chart_row>;
     auto exists(db*, const std::string& hash) -> bool;
     auto chart_count(db*) -> std::size_t;
+    auto chart_set_count(db*, int chart_set) -> std::size_t;
     void flush(db*);
     auto load_settings(db*) -> settings_t;
     auto save_settings(db*, const settings_t&) -> bool;
+    auto load_scores(db*) -> std::vector<score_row>;
+    auto load_rival_scores(db*) -> std::vector<score_row>;
+    auto save_score(db*, const std::string& hash, int player, int clear, int miss,
+                    int score) -> bool;
+    auto save_rival_score(db*, const std::string& hash, int rival, int clear,
+                          int miss, int score) -> bool;
 }

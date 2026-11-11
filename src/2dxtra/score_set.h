@@ -2,7 +2,13 @@
 
 #include "game.h"
 #include <cstdint>
+#include <string>
 #include <unordered_map>
+
+namespace database
+{
+	struct db;
+}
 
 namespace iidxtra::score_set
 {
@@ -28,9 +34,15 @@ namespace iidxtra::score_set
 	extern bm2dx::game_score_t* stock_rivals_p1;
 	extern bm2dx::game_score_t* stock_rivals_p2;
 
-	auto init() -> bool;
+	auto init(database::db* db) -> bool;
 	auto clear_stock() -> void;
 	auto uninit() -> void;
 	auto backup() -> void;
 	auto reload_all() -> void;
+
+	// Score archiving: every score set on a special chart is written to the
+	// chart database so it survives restarts and chart set switching.
+	auto reload_from_database() -> void;
+	auto persist(const std::string& chart_id, int player) -> void;
+	auto persist_rival(const std::string& chart_id, int rival) -> void;
 }

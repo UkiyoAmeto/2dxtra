@@ -15,6 +15,7 @@
 #include "../features/keysound_switch.h"
 #include "../features/cn_transformer.h"
 #include "../features/play_visuals.h"
+#include "../features/play_stats.h"
 #include "../features/timing_modifier.h"
 #include "../features/autoretry.h"
 #include "reset_state_hook.h"
@@ -52,14 +53,17 @@ namespace iidxtra::reset_state_hook
 	{
         timing_histogram::leave_result();
 
+        // forget the judgments of the previous play
+        play_stats::reset();
+
         // revert to default charts
         chart_set::revert();
 
         // mark session as valid
         score_invalidator_hook::reset_session();
 
-		// clear scores
-		score_set::custom.clear();
+		// re-load the archived scores for special charts
+		score_set::reload_from_database();
 
 		score_set::clear_stock();
 

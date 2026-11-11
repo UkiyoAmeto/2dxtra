@@ -50,11 +50,28 @@ namespace database
             "  FOREIGN KEY (music_id, difficulty)"
             "    REFERENCES original_charts(music_id, difficulty)"
             "    ON DELETE CASCADE"
+            ");"
+            "CREATE TABLE IF NOT EXISTS scores ("
+            "  hash    TEXT    NOT NULL,"
+            "  player  INTEGER NOT NULL,"
+            "  clear   INTEGER NOT NULL,"
+            "  miss    INTEGER NOT NULL,"
+            "  score   INTEGER NOT NULL,"
+            "  PRIMARY KEY (hash, player)"
+            ");"
+            "CREATE TABLE IF NOT EXISTS rival_scores ("
+            "  hash    TEXT    NOT NULL,"
+            "  rival   INTEGER NOT NULL,"
+            "  clear   INTEGER NOT NULL,"
+            "  miss    INTEGER NOT NULL,"
+            "  score   INTEGER NOT NULL,"
+            "  PRIMARY KEY (hash, rival)"
             ");";
 
         constexpr char kSeedChartSets[] =
             "INSERT OR IGNORE INTO chart_set (id, name)"
-            " VALUES (0, 'Kiraku'), (1, 'Kichiku'), (2, 'All-Scratch');";
+            " VALUES (0, 'Kiraku'), (1, 'Kichiku'), (2, 'All-Scratch'),"
+            " (3, 'Kichiku+All-Scratch'), (4, 'Kiraku+All-Scratch');";
 
         constexpr char kPragma[] =
             "PRAGMA journal_mode=WAL;"
@@ -106,12 +123,33 @@ namespace database
         constexpr char kCount[] =
             "SELECT COUNT(*) FROM charts;";
 
+        constexpr char kCountForSet[] =
+            "SELECT COUNT(*) FROM charts WHERE chart_set=?1;";
+
         constexpr char kLoadSettings[] =
             "SELECT key, value FROM settings;";
 
         constexpr char kSaveSettings[] =
             "INSERT INTO settings (key, value) VALUES (?1, ?2)"
             " ON CONFLICT(key) DO UPDATE SET value=excluded.value;";
+
+        constexpr char kLoadScores[] =
+            "SELECT hash, player, clear, miss, score FROM scores;";
+
+        constexpr char kLoadRivalScores[] =
+            "SELECT hash, rival, clear, miss, score FROM rival_scores;";
+
+        constexpr char kSaveScore[] =
+            "INSERT INTO scores (hash, player, clear, miss, score)"
+            " VALUES (?1, ?2, ?3, ?4, ?5)"
+            " ON CONFLICT(hash, player) DO UPDATE SET"
+            " clear=excluded.clear, miss=excluded.miss, score=excluded.score;";
+
+        constexpr char kSaveRivalScore[] =
+            "INSERT INTO rival_scores (hash, rival, clear, miss, score)"
+            " VALUES (?1, ?2, ?3, ?4, ?5)"
+            " ON CONFLICT(hash, rival) DO UPDATE SET"
+            " clear=excluded.clear, miss=excluded.miss, score=excluded.score;";
 
         auto bind_key(sqlite3_stmt* stmt, int chart_set, int music_id,
                       int difficulty) -> void
@@ -221,6 +259,65 @@ namespace database
             }
             sqlite3_finalize(stmt);
             return result == SQLITE_OK;
+        }
+
+        auto read_score_rows(sqlite3* handle, const char* sql)
+            -> std::vector<score_row>
+        {
+            auto rows = std::vector<score_row> {};
+            if (handle == nullptr)
+                return rows;
+
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr) != SQLITE_OK)
+                return rows;
+
+            while (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                auto* const hash = reinterpret_cast<const char*>(
+                    sqlite3_column_text(stmt, 0));
+
+                rows.push_back(score_row {
+                    .hash   = hash != nullptr ? hash : "",
+                    .player = sqlite3_column_int(stmt, 1),
+                    .clear  = sqlite3_column_int(stmt, 2),
+                    .miss   = sqlite3_column_int(stmt, 3),
+                    .score  = sqlite3_column_int(stmt, 4),
+                });
+            }
+
+            sqlite3_finalize(stmt);
+            return rows;
+        }
+
+        auto write_score_row(sqlite3* handle, const char* sql,
+                             const std::string& hash, int index,
+                             int clear, int miss, int score) -> bool
+        {
+            if (handle == nullptr || hash.empty() || index < 0)
+                return false;
+
+            auto* const mutex = sqlite3_db_mutex(handle);
+            sqlite3_mutex_enter(mutex);
+
+            sqlite3_stmt* stmt = nullptr;
+            auto success = sqlite3_prepare_v2(
+                handle, sql, -1, &stmt, nullptr) == SQLITE_OK;
+
+            if (success)
+            {
+                success =
+                    sqlite3_bind_text(stmt, 1, hash.c_str(), -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+                    sqlite3_bind_int(stmt, 2, index) == SQLITE_OK &&
+                    sqlite3_bind_int(stmt, 3, clear) == SQLITE_OK &&
+                    sqlite3_bind_int(stmt, 4, miss) == SQLITE_OK &&
+                    sqlite3_bind_int(stmt, 5, score) == SQLITE_OK &&
+                    sqlite3_step(stmt) == SQLITE_DONE;
+            }
+
+            sqlite3_finalize(stmt);
+            sqlite3_mutex_leave(mutex);
+            return success;
         }
     }
 
@@ -441,6 +538,25 @@ namespace database
         return count;
     }
 
+    auto chart_set_count(db* d, int chart_set) -> std::size_t
+    {
+        if (!d) return 0;
+
+        sqlite3_stmt* stmt = nullptr;
+        auto result = sqlite3_prepare_v2(d->handle, kCountForSet, -1, &stmt, nullptr);
+        if (result != SQLITE_OK)
+            return 0;
+
+        sqlite3_bind_int(stmt, 1, chart_set);
+
+        auto count = std::size_t { 0 };
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            count = static_cast<std::size_t>(sqlite3_column_int64(stmt, 0));
+
+        sqlite3_finalize(stmt);
+        return count;
+    }
+
     void flush(db* d)
     {
         if (!d) return;
@@ -519,5 +635,35 @@ namespace database
 
         sqlite3_mutex_leave(mutex);
         return success;
+    }
+
+    auto load_scores(db* d) -> std::vector<score_row>
+    {
+        if (d == nullptr)
+            return {};
+        return read_score_rows(d->handle, kLoadScores);
+    }
+
+    auto load_rival_scores(db* d) -> std::vector<score_row>
+    {
+        if (d == nullptr)
+            return {};
+        return read_score_rows(d->handle, kLoadRivalScores);
+    }
+
+    auto save_score(db* d, const std::string& hash, int player, int clear,
+                    int miss, int score) -> bool
+    {
+        if (d == nullptr)
+            return false;
+        return write_score_row(d->handle, kSaveScore, hash, player, clear, miss, score);
+    }
+
+    auto save_rival_score(db* d, const std::string& hash, int rival, int clear,
+                          int miss, int score) -> bool
+    {
+        if (d == nullptr)
+            return false;
+        return write_score_row(d->handle, kSaveRivalScore, hash, rival, clear, miss, score);
     }
 }

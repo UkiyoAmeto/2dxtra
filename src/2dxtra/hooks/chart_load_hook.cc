@@ -7,6 +7,7 @@
 #include "../features/regular_speed.h"
 #include "../features/chart_speed.h"
 #include "../features/chart_loader.h"
+#include "../features/play_stats.h"
 #include "../features/scratch_swap.h"
 #include "../features/cn_transformer.h"
 #include "chart_load_hook.h"
@@ -70,6 +71,10 @@ namespace iidxtra::chart_load_hook
 
 		// Reset invalid states to normal.
 		score_invalidator_hook::reset(player);
+
+		// A new chart is being loaded, so the previous play's judgments no
+		// longer matter.
+		play_stats::reset();
 
 		if (player == 0)
 		{

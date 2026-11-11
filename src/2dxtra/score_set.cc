@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "log.h"
 #include "chart_set.h"
+#include "database.h"
 #include "score_set.h"
 
 namespace iidxtra::score_set
@@ -30,8 +31,13 @@ namespace iidxtra::score_set
 	bm2dx::game_score_t* stock_rivals_p1 = nullptr;
 	bm2dx::game_score_t* stock_rivals_p2 = nullptr;
 
-	auto init() -> bool
+	// Chart database used to archive scores for special charts.
+	database::db* score_db = nullptr;
+
+	auto init(database::db* db) -> bool
 	{
+		score_db = db;
+
 		// Without a score table in the game build there is nothing to swap.
 		if (bm2dx::scores[0] == nullptr || bm2dx::scores[1] == nullptr)
 			return false;
@@ -50,7 +56,81 @@ namespace iidxtra::score_set
 		stock_rivals_p1 = static_cast<bm2dx::game_score_t*>(alloc(rival_size));
 		stock_rivals_p2 = static_cast<bm2dx::game_score_t*>(alloc(rival_size));
 
-		return stock_p1 && stock_p2 && stock_rivals_p1 && stock_rivals_p2;
+		if (stock_p1 == nullptr || stock_p2 == nullptr ||
+			stock_rivals_p1 == nullptr || stock_rivals_p2 == nullptr)
+			return false;
+
+		// Pull the archived scores for special charts back in.
+		reload_from_database();
+
+		return true;
+	}
+
+	auto reload_from_database() -> void
+	{
+		custom.clear();
+
+		for (auto& rivals: custom_rivals)
+			rivals.clear();
+
+		if (score_db == nullptr)
+			return;
+
+		for (auto const& row: database::load_scores(score_db))
+		{
+			if (row.player < 0 || row.player > 1)
+				continue;
+
+			// Ignore leftovers written before failed plays were handled
+			// properly; an empty record must not hide the real score.
+			if (row.clear == 0 && row.miss == 0 && row.score == 0)
+				continue;
+
+			auto& entry = custom[row.hash];
+			entry.clear[row.player] = row.clear;
+			entry.miss[row.player] = row.miss;
+			entry.score[row.player] = row.score;
+		}
+
+		for (auto const& row: database::load_rival_scores(score_db))
+		{
+			if (row.player < 0 || row.player >= bm2dx::MAX_RIVALS)
+				continue;
+
+			auto& entry = custom_rivals[row.player][row.hash];
+			entry.clear = row.clear;
+			entry.miss = row.miss;
+			entry.score = row.score;
+		}
+	}
+
+	auto persist(const std::string& chart_id, int player) -> void
+	{
+		if (score_db == nullptr || chart_id.empty() || player < 0 || player > 1)
+			return;
+
+		auto const entry = custom.find(chart_id);
+
+		if (entry == custom.end())
+			return;
+
+		database::save_score(score_db, chart_id, player,
+			entry->second.clear[player], entry->second.miss[player],
+			entry->second.score[player]);
+	}
+
+	auto persist_rival(const std::string& chart_id, int rival) -> void
+	{
+		if (score_db == nullptr || chart_id.empty() || rival < 0 || rival >= bm2dx::MAX_RIVALS)
+			return;
+
+		auto const entry = custom_rivals[rival].find(chart_id);
+
+		if (entry == custom_rivals[rival].end())
+			return;
+
+		database::save_rival_score(score_db, chart_id, rival,
+			entry->second.clear, entry->second.miss, entry->second.score);
 	}
 
 	void uninit()

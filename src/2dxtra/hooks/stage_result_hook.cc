@@ -1,8 +1,10 @@
 #include <MinHook.h>
 #include "../chart_set.h"
 #include "../score_set.h"
+#include "../features/play_stats.h"
 #include "../features/timing_histogram.h"
 #include "chart_load_hook.h"
+#include "score_invalidator_hook.h"
 #include "../diag.h"
 #include "stage_result_hook.h"
 
@@ -36,16 +38,72 @@ namespace iidxtra::stage_result_hook
 		auto static sampled = 0;
 		if (sampled < 4)
 		{
-			diag::write("result sample p%d style %d music %u diff %d: score %d miss %d clear %d populated %d",
+			diag::write("result sample p%d style %d music %u diff %d: score %d miss %d clear %d populated %d (counted miss %d of %d)",
 				player, static_cast<int>(style), music_id, difficulty,
 				game_score->score[difficulty], game_score->miss[difficulty],
-				game_score->clear[difficulty], game_score->is_populated);
+				game_score->clear[difficulty], game_score->is_populated,
+				play_stats::poor_count(static_cast<int>(player)),
+				play_stats::judged_count(static_cast<int>(player)));
 			++sampled;
 		}
 
 		target.clear[player] = game_score->clear[difficulty];
 		target.miss[player] = game_score->miss[difficulty];
 		target.score[player] = game_score->score[difficulty];
+	}
+
+	// The game only writes its score table when a play is cleared, so failed
+	// attempts leave nothing behind to copy. Fall back to the live counters we
+	// collected from the judgment hook in that case.
+	// Returns whether anything was written to the custom chart's score slot.
+	auto record_result(score_set::score_t& target, const int player, const bm2dx::play_style style,
+	                   const std::uint32_t music_id, const int difficulty) -> bool
+	{
+		auto const* const game_score = bm2dx::player_score(player, style, music_id);
+
+		if (game_score != nullptr && difficulty >= 0 && difficulty < 5
+			&& game_score->clear[difficulty] != 0)
+		{
+			copy_result(target, player, style, music_id, difficulty);
+			return true;
+		}
+
+		// Plays the game refuses to save (autoplay, illegal modifiers, ...) must
+		// not end up in the local archive either.
+		auto const invalid = (player == 0
+			? score_invalidator_hook::is_play_invalid_p1
+			: score_invalidator_hook::is_play_invalid_p2);
+
+		if (invalid || !play_stats::has_judgments(player))
+			return false;
+
+		auto const score = play_stats::last_score(player);
+		auto const miss = play_stats::poor_count(player);
+
+		if (score <= 0 && miss <= 0)
+			return false;
+
+		// Never downgrade a cleared result, and keep the best failed attempt.
+		if (target.clear[player] >= 2)
+			return false;
+
+		if (target.clear[player] == 1 && target.score[player] > score)
+			return false;
+
+		target.clear[player] = 1; // FAILED
+		target.miss[player] = miss;
+		target.score[player] = score;
+
+		auto static sampled = 0;
+		if (sampled < 8)
+		{
+			diag::write("result live p%d style %d music %u diff %d: score %d miss %d judged %d",
+				player, static_cast<int>(style), music_id, difficulty, score, miss,
+				play_stats::judged_count(player));
+			++sampled;
+		}
+
+		return true;
 	}
 
 	auto stage_result_hook_fn(void* a1) -> std::uint8_t
@@ -73,10 +131,19 @@ namespace iidxtra::stage_result_hook
 		if (bm2dx::state->play_style == 0)
 		{
 			if (bm2dx::state->p1_active && score_p1)
-				copy_result(*score_p1, 0, bm2dx::play_style::SP, music_id, bm2dx::state->p1_difficulty);
+			{
+				// Archive the result so it is still around after a restart.
+				if (record_result(*score_p1, 0, bm2dx::play_style::SP, music_id,
+					bm2dx::state->p1_difficulty))
+					score_set::persist(chart_load_hook::last_chart_id_p1, 0);
+			}
 
 			if (bm2dx::state->p2_active && score_p2)
-				copy_result(*score_p2, 1, bm2dx::play_style::SP, music_id, bm2dx::state->p2_difficulty);
+			{
+				if (record_result(*score_p2, 1, bm2dx::play_style::SP, music_id,
+					bm2dx::state->p2_difficulty))
+					score_set::persist(chart_load_hook::last_chart_id_p2, 1);
+			}
 		}
 		else
 		{
@@ -85,7 +152,13 @@ namespace iidxtra::stage_result_hook
 				? bm2dx::state->p1_difficulty: bm2dx::state->p2_difficulty);
 
 			if (auto* const custom_score = (player_index == 0 ? score_p1: score_p2))
-				copy_result(*custom_score, player_index, bm2dx::play_style::DP, music_id, difficulty_index);
+			{
+				if (record_result(*custom_score, player_index, bm2dx::play_style::DP, music_id,
+					difficulty_index))
+					score_set::persist(player_index == 0
+						? chart_load_hook::last_chart_id_p1: chart_load_hook::last_chart_id_p2,
+						player_index);
+			}
 		}
 
 		return result;

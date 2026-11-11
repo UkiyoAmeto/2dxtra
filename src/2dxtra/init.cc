@@ -95,7 +95,7 @@ namespace iidxtra
 
 		// Allocate memory.
 		diag::write("score_set::init");
-		diag::write("  score isolation %s", score_set::init() ? "enabled" : "DISABLED");
+		diag::write("  score isolation %s", score_set::init(db) ? "enabled" : "DISABLED");
 
 		// Initialize hooks.
 		diag::write("install chart_analyze_hook");
