@@ -13,6 +13,7 @@
 #include "../database.h"
 #include "../urafumen.h"
 #include "../all_scratch.h"
+#include "../dp_to_sp.h"
 #include "chart_analyze_hook.h"
 
 namespace iidxtra::chart_analyze_hook
@@ -25,8 +26,13 @@ namespace iidxtra::chart_analyze_hook
         constexpr std::size_t V22_SIZE = DIFF_STRIDE * DIFF_COUNT;
         constexpr std::size_t NOTE_OFFSET_IN_REC = 4 + 8;
 
-        // Kiraku, Kichiku, All-Scratch, Kichiku+All-Scratch, Kiraku+All-Scratch.
-        constexpr int CHART_SET_COUNT = 5;
+        // Kiraku, Kichiku, All-Scratch, Kichiku+All-Scratch, Kiraku+All-Scratch,
+        // DP-to-SP, DP-to-SP+All-Scratch.
+        constexpr int CHART_SET_COUNT = 7;
+
+        // The double play gates of the analyze record (DPN..DPL).
+        constexpr int DP_FIRST_DIFF = 6;
+        constexpr int DP_LAST_DIFF = 9;
 
         // The 10 analyze-gate bytes are the contiguous u8 rating fields of
         // music_entry_t (SPB..SPL, padding, DPN..DPL); index 5 is the padding
@@ -80,7 +86,8 @@ namespace iidxtra::chart_analyze_hook
                 return;
 
             // Mode 0 = Kiraku, 1 = Kichiku, 2 = All-Scratch,
-            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch.
+            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch,
+            // 5 = DP-to-SP, 6 = DP-to-SP + All-Scratch.
             auto written = std::size_t { 0 };
 
             if (g_mutate_mode == 2)
@@ -101,6 +108,21 @@ namespace iidxtra::chart_analyze_hook
 
                     // On failure the buffer is left untouched, so keeping the
                     // Kichiku/Kiraku output is the better fallback.
+                    if (scratched > 0)
+                        written = scratched;
+                }
+            }
+            else if (g_mutate_mode == 5 || g_mutate_mode == 6)
+            {
+                // Fold the second player's side onto the first player's lanes.
+                // Mode 6 re-shuffles the merged chart onto the turntable.
+                written = dp_to_sp::convert_in_place(buf, SCRATCH_CAPACITY);
+
+                if (written > 0 && g_mutate_mode == 6)
+                {
+                    auto const scratched =
+                        all_scratch::convert_in_place(buf, SCRATCH_CAPACITY);
+
                     if (scratched > 0)
                         written = scratched;
                 }
@@ -158,6 +180,16 @@ namespace iidxtra::chart_analyze_hook
                 if (is_valid_diff(gate_rating(entry)[i]))
                     ++rank;
             return rank;
+        }
+
+        // DP-to-SP sets are derived from the double charts, so the single play
+        // gates do not need a conversion pass (and would only store empty rows).
+        auto applies_to_diff(int mode, int d) -> bool
+        {
+            if (mode < 5)
+                return true;
+
+            return d >= DP_FIRST_DIFF && d <= DP_LAST_DIFF;
         }
 
         auto hash_for_diff(const std::vector<std::string>& hashes,
@@ -235,57 +267,68 @@ namespace iidxtra::chart_analyze_hook
             }
 
             // Mode 0 = Kiraku, 1 = Kichiku, 2 = All-Scratch,
-            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch.
+            // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch,
+            // 5 = DP-to-SP, 6 = DP-to-SP + All-Scratch.
             for (int mode = 0; mode < CHART_SET_COUNT; ++mode)
             {
+                auto applicable = std::vector<diff_info const*> {};
+                for (auto const& di : valid_diffs)
+                    if (applies_to_diff(mode, di.d))
+                        applicable.push_back(&di);
+
                 std::vector<database::chart_row> cached(DIFF_COUNT);
                 std::vector<bool> is_cached(DIFF_COUNT, false);
                 int cache_hit_count = 0;
 
-                for (auto const& di : valid_diffs)
+                for (auto const* di : applicable)
                 {
-                    auto row = database::lookup(g_db, mode, id, di.d, di.orig_hash);
+                    auto row = database::lookup(g_db, mode, id, di->d, di->orig_hash);
                     if (row)
                     {
-                        cached[di.d] = std::move(*row);
-                        is_cached[di.d] = true;
+                        cached[di->d] = std::move(*row);
+                        is_cached[di->d] = true;
                         ++cache_hit_count;
                     }
                 }
 
                 bool const all_cached =
-                    cache_hit_count == static_cast<int>(valid_diffs.size());
+                    cache_hit_count == static_cast<int>(applicable.size());
 
                 if (!all_cached)
                 {
                     auto dummy_v22 = std::vector<std::uint8_t>(V22_SIZE, 0);
                     run_pass2(scratch, entry, dummy_v22.data(), flag, mode);
 
-                    for (auto const& di : valid_diffs)
+                    for (auto const* di : applicable)
                     {
-                        if (is_cached[di.d])
+                        if (is_cached[di->d])
                             continue;
 
-                        auto const alt = note_count(dummy_v22.data(), di.d);
+                        auto const alt = note_count(dummy_v22.data(), di->d);
                         std::int32_t radar[6] {};
-                        radar_of(dummy_v22.data(), di.d, radar);
+                        radar_of(dummy_v22.data(), di->d, radar);
 
-                        auto const& mh = hash_for_diff(g_mutated_hashes, entry, di.d);
-                        auto const* data = data_for_diff(g_mutated_data, entry, di.d);
+                        auto const& mh = hash_for_diff(g_mutated_hashes, entry, di->d);
+                        auto const* data = data_for_diff(g_mutated_data, entry, di->d);
+
+                        // A failed conversion leaves a blank slot; inserting it
+                        // would store a chart row without any chart data.
+                        if (mh.empty())
+                            continue;
 
                         database::chart_row row;
                         row.chart_set  = mode;
                         row.music_id   = id;
-                        row.difficulty = di.d;
+                        row.difficulty = di->d;
                         row.hash       = mh;
                         row.notes      = static_cast<std::uint32_t>(alt);
                         std::memcpy(row.radar, radar, sizeof(radar));
                         if (data)
                             row.data = *data;
-                        database::insert(g_db, row, di.orig_hash);
+                        database::insert(g_db, row, di->orig_hash);
 
-                        cached[di.d] = std::move(row);
-                        is_cached[di.d] = true;
+                        cached[di->d] = std::move(row);
+                        is_cached[di->d] = true;
                     }
                 }
             }

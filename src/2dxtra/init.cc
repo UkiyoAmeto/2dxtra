@@ -149,6 +149,7 @@ namespace iidxtra
 
 		// Enable all hooks.
 		diag::write("enabling hooks");
+		diag::install_crash_handler();
 		MH_EnableHook(MH_ALL_HOOKS);
 		diag::write("init complete");
 

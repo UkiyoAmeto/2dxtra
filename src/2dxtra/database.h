@@ -12,7 +12,8 @@ namespace database
     struct chart_row
     {
         int chart_set; // 0=Kiraku, 1=Kichiku, 2=All-Scratch,
-                       // 3=Kichiku+All-Scratch, 4=Kiraku+All-Scratch
+                       // 3=Kichiku+All-Scratch, 4=Kiraku+All-Scratch,
+                       // 5=DP-to-SP, 6=DP-to-SP+All-Scratch
         int music_id;
         int difficulty; // 0..9 (loader chart index)
         std::string hash; // sha256 of the mutated chart (also its id)

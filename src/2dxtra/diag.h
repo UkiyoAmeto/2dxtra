@@ -9,4 +9,8 @@ namespace iidxtra::diag
 
 	// Appends one timestamped line and flushes it. No-op if the file is closed.
 	auto write(const char* format, ...) -> void;
+
+	// Logs the exception address of any unhandled exception (and continues the
+	// search for a real handler) so that a crash can be located from the log.
+	auto install_crash_handler() -> void;
 }

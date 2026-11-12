@@ -63,11 +63,26 @@ namespace iidxtra::chart_set
 			auto result = chart_set_t {};
 			result.id = set_id;
 
+			// DP-to-SP charts are stored under the double play gate they were
+			// converted from, but play back in the single play slot of the
+			// matching difficulty.
+			auto const mirrors_double_charts = is_dp_to_sp(name);
 			auto charts_added = 0;
 
 			for (auto const& row: database::charts_for_set(g_db, set_id))
 			{
-				auto const loader_index = gate_to_loader(row.difficulty);
+				if (row.hash.empty())
+					continue;
+
+				auto const gate = mirrors_double_charts
+					? (row.difficulty >= 6 && row.difficulty <= 9
+						? std::optional<int>(row.difficulty - 5) : std::nullopt)
+					: std::optional<int>(row.difficulty);
+
+				if (!gate.has_value())
+					continue;
+
+				auto const loader_index = gate_to_loader(gate.value());
 
 				if (!loader_index.has_value())
 					continue;
@@ -75,12 +90,13 @@ namespace iidxtra::chart_set
 				auto& music_entry = result.music[row.music_id];
 
 				music_entry.charts[loader_index.value()] = chart_t {
-					.id    = row.hash,
-					.notes = row.notes,
-					.radar = bm2dx::notes_radar_t {
+					.id         = row.hash,
+					.notes      = row.notes,
+					.radar      = bm2dx::notes_radar_t {
 						row.radar[0], row.radar[1], row.radar[2],
 						row.radar[3], row.radar[4], row.radar[5],
 					},
+					.difficulty = static_cast<std::uint8_t>(row.difficulty),
 				};
 
 				charts_added++;
@@ -94,18 +110,51 @@ namespace iidxtra::chart_set
 	auto exists(const std::string& id) -> bool
 		{ return database::exists(g_db, id); }
 
+	auto is_dp_to_sp(const std::string& name) -> bool
+		{ return name.starts_with("DP-to-SP"); }
+
+	auto has_chart(const std::uint32_t music_id, const std::uint8_t loader_index) -> bool
+	{
+		if (active.empty() || !custom.contains(active))
+			return false;
+
+		auto const& set = custom.at(active);
+		auto const music = set.music.find(music_id);
+
+		if (music == set.music.end())
+			return false;
+
+		return music->second.charts.contains(loader_index);
+	}
+
 	auto pull_chart(int music_id, int loader_index, std::uint8_t* dst,
 	                std::size_t capacity) -> std::optional<database::pulled_chart>
 	{
 		if (active.empty() || !g_db || !custom.contains(active))
 			return std::nullopt;
 
+		// Only single play slots carry charts in a DP-to-SP set; double play
+		// requests fall through to the stock chart (the set is SP only).
 		auto const gate = loader_to_gate(loader_index);
 		if (!gate.has_value())
 			return std::nullopt;
 
-		return database::pull(g_db, custom.at(active).id, music_id,
-			gate.value(), dst, capacity);
+		auto const& set = custom.at(active);
+		auto const music = set.music.find(static_cast<std::uint32_t>(music_id));
+
+		if (music == set.music.end())
+			return std::nullopt;
+
+		auto const chart = music->second.charts.find(
+			static_cast<std::uint8_t>(loader_index));
+
+		if (chart == music->second.charts.end())
+			return std::nullopt;
+
+		// Sets that mirror a different difficulty need the stored gate, not
+		// the one the game asked for.
+		return database::pull(g_db, set.id, music_id,
+			chart->second.difficulty, dst, capacity);
 	}
 
 	auto revert() -> void

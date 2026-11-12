@@ -12,6 +12,11 @@ namespace iidxtra::chart_set
 		std::string id;
 		std::uint32_t notes;
 		bm2dx::notes_radar_t radar;
+
+		// the difficulty (analyze gate) the chart is stored under; differs from
+		// the loader index for sets that mirror one difficulty onto another
+		// (DP-to-SP)
+		std::uint8_t difficulty = 0;
 	};
 
 	struct music_t
@@ -50,6 +55,13 @@ namespace iidxtra::chart_set
 
 	// Whether any chart in the database carries this id (mutated hash).
 	auto exists(const std::string& id) -> bool;
+
+	// Whether this set stores double charts re-targeted at the single play
+	// difficulty slots (DP-to-SP family).
+	auto is_dp_to_sp(const std::string& name) -> bool;
+
+	// Whether the active set carries a chart for this music in the given slot.
+	auto has_chart(std::uint32_t music_id, std::uint8_t loader_index) -> bool;
 
 	// Pull the active set's mutated chart for a music entry into `dst`.
 	// `loader_index` is the .1 chart index used by the game.

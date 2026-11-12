@@ -46,6 +46,7 @@ set(SOURCE_FILES
     src/2dxtra/settings.cc
     src/2dxtra/urafumen.cc
     src/2dxtra/all_scratch.cc
+    src/2dxtra/dp_to_sp.cc
     src/2dxtra/gui/gui.cc
     src/2dxtra/gui/loader.cc
     src/2dxtra/gui/log_window.cc
@@ -112,6 +113,7 @@ configure_file(src/2dxtra/offsets.h.in macros/offsets.h @ONLY)
 
 if (MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /EHsc)
+    target_link_options(${PROJECT_NAME} PRIVATE "/MAP:${CMAKE_CURRENT_BINARY_DIR}/2dxtra.map" /MAPINFO:EXPORTS)
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE

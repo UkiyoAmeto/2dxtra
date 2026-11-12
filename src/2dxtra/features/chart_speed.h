@@ -16,6 +16,9 @@ namespace iidxtra::chart_speed
 	// Shift audio pitch by the chart speed multiplier when enabled.
 	extern bool pitch_follows_rate;
 
+	// Number of LOAD_AUDIO_FN calls seen so far (diagnostics).
+	auto audio_load_count() -> std::uint64_t;
+
 	auto reset() -> void;
 	auto render_progress() -> void;
 	auto mutate(std::uint8_t player, std::vector<bm2dx::chart_event_t>& buffer) -> void;

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <malloc.h>
 #include <unordered_set>
 #include <vector>
@@ -11,8 +12,11 @@
 #include <MinHook.h>
 #include <rubberband/RubberBandStretcher.h>
 
+#include "../diag.h"
 #include "../log.h"
 #include "../game.h"
+#include "../chart_set.h"
+#include "../hooks/chart_load_hook.h"
 #include "../hooks/score_invalidator_hook.h"
 #include "chart_speed.h"
 
@@ -78,6 +82,10 @@ namespace iidxtra::chart_speed
 
 	using get_sound_entry_fn = sound_entry_t* (*)(int);
 
+	// Number of sound bank loads seen so far. Used by the chart loader to tell
+	// whether the sound bank is (re)built per chart load.
+	std::uint64_t audio_loads = 0;
+
 	// Current chart speed multiplier; 1.00 = stock behavior
 	float rate = 1.0f;
 
@@ -99,6 +107,9 @@ namespace iidxtra::chart_speed
 		rate_previous = 1.0f;
 		pitch_follows_rate = false;
 	}
+
+	auto audio_load_count() -> std::uint64_t
+		{ return audio_loads; }
 
     auto render_progress() -> void
     {
@@ -301,10 +312,130 @@ namespace iidxtra::chart_speed
 		return true;
 	}
 
+	// The sound package the game loads for a play is chosen by a per chart
+	// index variant character kept in the music entry, right after the fields
+	// this project already knows about. The game formats either
+	// "%05d/%05d%c.s3p" with it, or "%05d/%05d.s3p" when it is '0'.
+	auto constexpr sound_variant_offset = 0x684;
+
+	auto read_path_string(const std::int64_t data) -> std::string
+	{
+		if (data < 0x10000 || data > 0x7FFFFFFFFFLL)
+			return {};
+
+		auto const* const text = reinterpret_cast<char const*>(data);
+
+		if (IsBadReadPtr(text, 1))
+			return {};
+
+		auto path = std::string {};
+
+		for (int i = 0; i < 260; i++)
+		{
+			if (IsBadReadPtr(text + i, 1))
+				return {};
+
+			auto const c = text[i];
+
+			if (c == 0)
+				break;
+
+			if (c < 0x20 || c > 0x7E)
+				return {};
+
+			path.push_back(c);
+		}
+
+		return path;
+	}
+
+	// A DP-to-SP set has notes built from a double play chart, and their wav
+	// ids only mean the right thing when the sound package of that chart is
+	// loaded. The game picks the package for the difficulty being played, so
+	// swap the variant character for the one of the source chart. Returns an
+	// empty string when the game's own choice is already right.
+	auto adjust_sound_package(const std::int64_t filepath_data) -> std::string
+	{
+		auto const gate = chart_load_hook::dp_source_gate;
+
+		if (gate < 0 || !chart_set::is_dp_to_sp(chart_set::active))
+			return {};
+
+		if (!bm2dx::state || !bm2dx::state->active_music)
+			return {};
+
+		auto path = read_path_string(filepath_data);
+
+		if (path.size() < 9 || path.compare(path.size() - 4, 4, ".s3p") != 0)
+			return {};
+
+		auto const slash = path.find_last_of('/');
+
+		if (slash == std::string::npos)
+			return {};
+
+		auto const* const entry = reinterpret_cast<char const*>(bm2dx::state->active_music);
+		auto const current = path[path.size() - 5];
+		auto const wanted = entry[sound_variant_offset + gate];
+		auto corrected = std::string {};
+
+		if (wanted == '0')
+		{
+			// No variant character at all, i.e. "%05d/%05d.s3p".
+			if (current < '0' || current > '9')
+				return {};
+
+			corrected = path.substr(0, slash + 1);
+			corrected += std::to_string(bm2dx::state->active_music->id) + ".s3p";
+
+			if (corrected == path)
+				return {};
+		}
+		else
+		{
+			if (current == wanted || current < '0' || current > '9')
+				return {};
+
+			corrected = path;
+			corrected[corrected.size() - 5] = wanted;
+		}
+
+		diag::write("[audio] sound package '%s' -> '%s' (gate %d, played %c)",
+			path.c_str(), corrected.c_str(), gate, current);
+
+		return corrected;
+	}
+
 	auto audio_load_detour(std::int64_t sound_ctx, int sound_index, std::int64_t filepath_data, int flags) -> bool
 	{
+		audio_loads++;
+
+		auto const corrected = adjust_sound_package(filepath_data);
+
+		// Diagnostics: dump what the sound bank is actually being fed with so
+		// that the DP->SP chart can pick the right audio variant.
+		if (audio_loads <= 512)
+		{
+			auto const path = read_path_string(filepath_data);
+
+			diag::write("[audio] #%llu index %d path '%s' (%llX) flags %d",
+				static_cast<unsigned long long>(audio_loads), sound_index,
+				path.c_str(), static_cast<unsigned long long>(filepath_data), flags);
+		}
+
+		// Keep the corrected path alive in case the game holds on to it.
+		auto static corrected_storage = std::string {};
+		auto effective_path = filepath_data;
+
+		if (!corrected.empty())
+		{
+			corrected_storage = corrected;
+			effective_path = static_cast<std::int64_t>(
+				reinterpret_cast<std::uintptr_t>(corrected_storage.c_str()));
+		}
+
 		auto result = reinterpret_cast<bool (*) (std::int64_t, int, std::int64_t, int)>
-			(original_audio_load_fn)(sound_ctx, sound_index, filepath_data, flags);
+			(original_audio_load_fn)(sound_ctx, sound_index, effective_path, flags);
 
 		if (!result || rate == 1.0f)
 			return result;
