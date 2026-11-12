@@ -72,7 +72,10 @@ namespace database
             "INSERT OR IGNORE INTO chart_set (id, name)"
             " VALUES (0, 'Kiraku'), (1, 'Kichiku'), (2, 'All-Scratch'),"
             " (3, 'Kichiku+All-Scratch'), (4, 'Kiraku+All-Scratch'),"
-            " (5, 'DP-to-SP'), (6, 'DP-to-SP+All-Scratch');";
+            " (5, 'DP-to-SP'), (6, 'DP-to-SP+All-Scratch'),"
+            " (7, 'DP-to-SP+Kichiku'), (8, 'DP-to-SP+Kiraku'),"
+            " (9, 'DP-to-SP+Kichiku+All-Scratch'),"
+            " (10, 'DP-to-SP+Kiraku+All-Scratch');";
 
         constexpr char kPragma[] =
             "PRAGMA journal_mode=WAL;"

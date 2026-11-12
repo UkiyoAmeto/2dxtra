@@ -28,7 +28,7 @@ namespace iidxtra::chart_analyze_hook
 
         // Kiraku, Kichiku, All-Scratch, Kichiku+All-Scratch, Kiraku+All-Scratch,
         // DP-to-SP, DP-to-SP+All-Scratch.
-        constexpr int CHART_SET_COUNT = 7;
+        constexpr int CHART_SET_COUNT = 11;
 
         // The double play gates of the analyze record (DPN..DPL).
         constexpr int DP_FIRST_DIFF = 6;
@@ -87,7 +87,10 @@ namespace iidxtra::chart_analyze_hook
 
             // Mode 0 = Kiraku, 1 = Kichiku, 2 = All-Scratch,
             // 3 = Kichiku + All-Scratch, 4 = Kiraku + All-Scratch,
-            // 5 = DP-to-SP, 6 = DP-to-SP + All-Scratch.
+            // 5 = DP-to-SP, 6 = DP-to-SP + All-Scratch,
+            // 7 = DP-to-SP + Kichiku, 8 = DP-to-SP + Kiraku,
+            // 9 = DP-to-SP + Kichiku + All-Scratch,
+            // 10 = DP-to-SP + Kiraku + All-Scratch.
             auto written = std::size_t { 0 };
 
             if (g_mutate_mode == 2)
@@ -112,19 +115,37 @@ namespace iidxtra::chart_analyze_hook
                         written = scratched;
                 }
             }
-            else if (g_mutate_mode == 5 || g_mutate_mode == 6)
+            else if (g_mutate_mode >= 5)
             {
-                // Fold the second player's side onto the first player's lanes.
-                // Mode 6 re-shuffles the merged chart onto the turntable.
+                // Every DP-to-SP set starts by folding the second player's
+                // side onto the first player's lanes, then optionally
+                // regenerates the chart and re-shuffles it onto the turntable.
                 written = dp_to_sp::convert_in_place(buf, SCRATCH_CAPACITY);
 
-                if (written > 0 && g_mutate_mode == 6)
+                if (written > 0 && g_mutate_mode != 5)
                 {
-                    auto const scratched =
-                        all_scratch::convert_in_place(buf, SCRATCH_CAPACITY);
+                    auto const kichiku = (g_mutate_mode == 7 || g_mutate_mode == 9);
+                    auto const kiraku = (g_mutate_mode == 8 || g_mutate_mode == 10);
+                    auto const scratch = (g_mutate_mode == 6
+                        || g_mutate_mode == 9 || g_mutate_mode == 10);
 
-                    if (scratched > 0)
-                        written = scratched;
+                    if (kichiku || kiraku)
+                    {
+                        auto const regenerated = urafumen::convert_in_place(
+                            buf, SCRATCH_CAPACITY, /*player=*/0, kichiku);
+
+                        if (regenerated > 0)
+                            written = regenerated;
+                    }
+
+                    if (scratch)
+                    {
+                        auto const scratched =
+                            all_scratch::convert_in_place(buf, SCRATCH_CAPACITY);
+
+                        if (scratched > 0)
+                            written = scratched;
+                    }
                 }
             }
             else
