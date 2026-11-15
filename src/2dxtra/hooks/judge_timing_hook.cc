@@ -1,5 +1,6 @@
 #include <MinHook.h>
 #include "../game.h"
+#include "../features/lr2_judge.h"
 #include "../features/timing_modifier.h"
 #include "judge_timing_hook.h"
 
@@ -15,6 +16,9 @@ namespace iidxtra::judge_timing_hook
 
         // Modify the timing windows.
         timing_modifier::execute(data, player);
+
+        // Swap in the LR2 judgement for the LR2-Judge chart sets.
+        lr2_judge::apply(data, player);
 
         return result;
 	}

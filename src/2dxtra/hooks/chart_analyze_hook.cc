@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -27,8 +28,19 @@ namespace iidxtra::chart_analyze_hook
         constexpr std::size_t NOTE_OFFSET_IN_REC = 4 + 8;
 
         // Kiraku, Kichiku, All-Scratch, Kichiku+All-Scratch, Kiraku+All-Scratch,
-        // DP-to-SP, DP-to-SP+All-Scratch.
-        constexpr int CHART_SET_COUNT = 11;
+        // DP-to-SP, DP-to-SP+All-Scratch, DP-to-SP+Kichiku, DP-to-SP+Kiraku,
+        // DP-to-SP+Kichiku+All-Scratch, DP-to-SP+Kiraku+All-Scratch,
+        // LR2-Judge (Easy/Normal/Hard/V.Hard),
+        // Kichiku with LR2-Judge (Easy/Normal/Hard/V.Hard).
+        constexpr int CHART_SET_COUNT = 19;
+
+        // Sets that only change the judge windows: the chart itself is the
+        // original one, so no conversion pass is needed for them.
+        constexpr int LR2_JUDGE_FIRST = 11;
+
+        // Sets that are the Kichiku chart with another judge: their rows are
+        // copied from the Kichiku set instead of running another pass.
+        constexpr int KICHIKU_LR2_FIRST = 15;
 
         // The double play gates of the analyze record (DPN..DPL).
         constexpr int DP_FIRST_DIFF = 6;
@@ -65,6 +77,7 @@ namespace iidxtra::chart_analyze_hook
         int  g_mutate_mode = 0;
 
         std::vector<std::string> g_orig_hashes {};
+        std::vector<std::vector<std::uint8_t>> g_orig_data {};
         std::vector<std::string> g_mutated_hashes {};
         std::vector<std::vector<std::uint8_t>> g_mutated_data {};
 
@@ -80,7 +93,13 @@ namespace iidxtra::chart_analyze_hook
             // the raw chart data (and the mod's offline tooling). The game
             // caps reads at SCRATCH_CAPACITY, so `read` cannot overrun.
             if (!g_mutate)
+            {
                 g_orig_hashes.push_back(urafumen::sha256_hex(buf, read));
+
+                // The judge-only sets reuse the untouched chart, so keep the
+                // bytes around as well.
+                g_orig_data.emplace_back(buf, buf + read);
+            }
 
             if (!g_mutate)
                 return;
@@ -205,12 +224,45 @@ namespace iidxtra::chart_analyze_hook
 
         // DP-to-SP sets are derived from the double charts, so the single play
         // gates do not need a conversion pass (and would only store empty rows).
+        // The LR2-Judge family keeps both sides, so every gate applies to it.
         auto applies_to_diff(int mode, int d) -> bool
         {
-            if (mode < 5)
+            if (mode < 5 || mode >= LR2_JUDGE_FIRST)
                 return true;
 
             return d >= DP_FIRST_DIFF && d <= DP_LAST_DIFF;
+        }
+
+        // Chart rows are keyed by the hash of the chart they were built from,
+        // so every set that shares the same bytes needs its own hash.
+        auto tagged_hash(const std::vector<std::uint8_t>& data, int mode) -> std::string
+        {
+            if (data.empty())
+                return {};
+
+            auto tagged = std::vector<std::uint8_t> {};
+            tagged.reserve(data.size() + 1);
+            tagged.insert(tagged.end(), data.begin(), data.end());
+            tagged.push_back(static_cast<std::uint8_t>(mode));
+
+            return urafumen::sha256_hex(tagged.data(), tagged.size());
+        }
+
+        // The judge-only sets advertise a different radar (see the loader).
+        auto radar_scale_for(int mode) -> float
+        {
+            switch (mode)
+            {
+                case 11: return 0.9f;   // LR2-Judge : Easy
+                case 12: return 0.95f;  // LR2-Judge : Normal
+                case 13: return 1.2f;   // LR2-Judge : Hard
+                case 14: return 2.0f;   // LR2-Judge : V.Hard
+                case 15: return 0.9f;   // Kichiku with LR2-Judge : Easy
+                case 16: return 0.95f;  // Kichiku with LR2-Judge : Normal
+                case 17: return 1.2f;   // Kichiku with LR2-Judge : Hard
+                case 18: return 2.0f;   // Kichiku with LR2-Judge : V.Hard
+                default: return 1.0f;
+            }
         }
 
         auto hash_for_diff(const std::vector<std::string>& hashes,
@@ -269,6 +321,7 @@ namespace iidxtra::chart_analyze_hook
 
             g_mutate = false;
             g_orig_hashes.clear();
+            g_orig_data.clear();
             auto const result = g_analyze_hook.call<__int64>(
                 scratch, entry, v22, flag);
 
@@ -292,6 +345,73 @@ namespace iidxtra::chart_analyze_hook
             // 5 = DP-to-SP, 6 = DP-to-SP + All-Scratch.
             for (int mode = 0; mode < CHART_SET_COUNT; ++mode)
             {
+                // The LR2-Judge sets leave the chart alone; only the judge
+                // windows and the advertised radar change. Their rows are
+                // built straight from the analysed original, so the (slow)
+                // conversion pass is skipped entirely.
+                if (mode >= LR2_JUDGE_FIRST && mode < KICHIKU_LR2_FIRST)
+                {
+                    auto const* const analyzed = reinterpret_cast<const std::uint8_t*>(v22);
+                    auto const factor = radar_scale_for(mode);
+
+                    for (auto const& di: valid_diffs)
+                    {
+                        if (database::lookup(g_db, mode, id, di.d, di.orig_hash))
+                            continue;
+
+                        auto const* const source = data_for_diff(g_orig_data, entry, di.d);
+
+                        if (source == nullptr || source->empty())
+                            continue;
+
+                        std::int32_t radar[6] {};
+                        radar_of(analyzed, di.d, radar);
+
+                        for (auto& value: radar)
+                            value = static_cast<std::int32_t>(std::lround(value * factor));
+
+                        database::chart_row row;
+                        row.chart_set  = mode;
+                        row.music_id   = id;
+                        row.difficulty = di.d;
+                        row.hash       = tagged_hash(*source, mode);
+                        row.notes      = static_cast<std::uint32_t>(note_count(analyzed, di.d));
+                        std::memcpy(row.radar, radar, sizeof(radar));
+                        row.data = *source;
+                        database::insert(g_db, row, di.orig_hash);
+                    }
+
+                    continue;
+                }
+
+                // The Kichiku + LR2-Judge sets are the Kichiku chart with a
+                // different judge, so their rows are copies of the Kichiku
+                // rows (the Kichiku set is built before them).
+                if (mode >= KICHIKU_LR2_FIRST)
+                {
+                    auto const factor = radar_scale_for(mode);
+
+                    for (auto const& di: valid_diffs)
+                    {
+                        if (database::lookup(g_db, mode, id, di.d, di.orig_hash))
+                            continue;
+
+                        auto base = database::fetch(g_db, 1, id, di.d, di.orig_hash);
+
+                        if (!base || base->data.empty())
+                            continue;
+
+                        for (auto& value: base->radar)
+                            value = static_cast<int>(std::lround(value * factor));
+
+                        base->chart_set = mode;
+                        base->hash = tagged_hash(base->data, mode);
+                        database::insert(g_db, *base, di.orig_hash);
+                    }
+
+                    continue;
+                }
+
                 auto applicable = std::vector<diff_info const*> {};
                 for (auto const& di : valid_diffs)
                     if (applies_to_diff(mode, di.d))

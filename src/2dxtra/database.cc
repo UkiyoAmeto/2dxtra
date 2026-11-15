@@ -10,6 +10,7 @@ namespace database
     {
         sqlite3* handle = nullptr;
         sqlite3_stmt* stmt_lookup = nullptr;
+        sqlite3_stmt* stmt_fetch = nullptr;
         sqlite3_stmt* stmt_insert = nullptr;
         sqlite3_stmt* stmt_insert_orig = nullptr;
         sqlite3_stmt* stmt_delete_orig = nullptr;
@@ -75,7 +76,13 @@ namespace database
             " (5, 'DP-to-SP'), (6, 'DP-to-SP+All-Scratch'),"
             " (7, 'DP-to-SP+Kichiku'), (8, 'DP-to-SP+Kiraku'),"
             " (9, 'DP-to-SP+Kichiku+All-Scratch'),"
-            " (10, 'DP-to-SP+Kiraku+All-Scratch');";
+            " (10, 'DP-to-SP+Kiraku+All-Scratch'),"
+            " (11, 'LR2-Judge : Easy'), (12, 'LR2-Judge : Normal'),"
+            " (13, 'LR2-Judge : Hard'), (14, 'LR2-Judge : V.Hard'),"
+            " (15, 'Kichiku with LR2-Judge : Easy'),"
+            " (16, 'Kichiku with LR2-Judge : Normal'),"
+            " (17, 'Kichiku with LR2-Judge : Hard'),"
+            " (18, 'Kichiku with LR2-Judge : V.Hard');";
 
         constexpr char kPragma[] =
             "PRAGMA journal_mode=WAL;"
@@ -89,6 +96,15 @@ namespace database
             "SELECT c.hash, c.notes,"
             "  c.radar_notes, c.radar_peak, c.radar_scratch,"
             "  c.radar_soflan, c.radar_charge, c.radar_chord, o.hash"
+            " FROM charts c JOIN original_charts o"
+            "   ON o.music_id = c.music_id AND o.difficulty = c.difficulty"
+            " WHERE c.chart_set=?1 AND c.music_id=?2 AND c.difficulty=?3;";
+
+        // Same row as kLookup, but with the (compressed) chart data attached.
+        constexpr char kFetch[] =
+            "SELECT c.hash, c.notes,"
+            "  c.radar_notes, c.radar_peak, c.radar_scratch,"
+            "  c.radar_soflan, c.radar_charge, c.radar_chord, o.hash, c.data"
             " FROM charts c JOIN original_charts o"
             "   ON o.music_id = c.music_id AND o.difficulty = c.difficulty"
             " WHERE c.chart_set=?1 AND c.music_id=?2 AND c.difficulty=?3;";
@@ -343,7 +359,9 @@ namespace database
         }
         sqlite3_exec(d->handle, kSeedChartSets, nullptr, nullptr, nullptr);
 
-        sqlite3_prepare_v2(d->handle, kLookup, -1, &d->stmt_lookup, nullptr);        sqlite3_prepare_v2(d->handle, kInsert,  -1, &d->stmt_insert, nullptr);
+        sqlite3_prepare_v2(d->handle, kLookup, -1, &d->stmt_lookup, nullptr);
+        sqlite3_prepare_v2(d->handle, kFetch,  -1, &d->stmt_fetch,  nullptr);
+        sqlite3_prepare_v2(d->handle, kInsert,  -1, &d->stmt_insert, nullptr);
         sqlite3_prepare_v2(d->handle, kInsertOrig, -1, &d->stmt_insert_orig, nullptr);
         sqlite3_prepare_v2(d->handle, kDeleteOrig, -1, &d->stmt_delete_orig, nullptr);
         sqlite3_prepare_v2(d->handle, kPull, -1, &d->stmt_pull, nullptr);
@@ -358,6 +376,7 @@ namespace database
     {
         if (!d) return;
         sqlite3_finalize(d->stmt_lookup);
+        sqlite3_finalize(d->stmt_fetch);
         sqlite3_finalize(d->stmt_insert);
         sqlite3_finalize(d->stmt_insert_orig);
         sqlite3_finalize(d->stmt_delete_orig);
@@ -397,6 +416,55 @@ namespace database
             sqlite3_step(del);
             sqlite3_reset(del);
             return std::nullopt;
+        }
+
+        row->chart_set   = chart_set;
+        row->music_id    = music_id;
+        row->difficulty  = difficulty;
+        sqlite3_reset(stmt);
+        return row;
+    }
+
+    // Same as lookup(), but also decompresses the stored chart data.
+    auto fetch(db* d, int chart_set, int music_id, int difficulty,
+               const std::string& orig_hash) -> std::optional<chart_row>
+    {
+        if (!d) return std::nullopt;
+
+        auto* stmt = d->stmt_fetch;
+        sqlite3_reset(stmt);
+        bind_key(stmt, chart_set, music_id, difficulty);
+
+        auto row = read_row(stmt);
+        if (!row)
+        {
+            sqlite3_reset(stmt);
+            return std::nullopt;
+        }
+
+        auto const stored = reinterpret_cast<const char*>(
+            sqlite3_column_text(stmt, 8));
+        if (stored != orig_hash)
+        {
+            sqlite3_reset(stmt);
+            return std::nullopt;
+        }
+
+        auto const* const blob = static_cast<const std::uint8_t*>(
+            sqlite3_column_blob(stmt, 9));
+        auto const size = static_cast<std::size_t>(sqlite3_column_bytes(stmt, 9));
+
+        if (blob != nullptr && size > 0)
+        {
+            auto const content = ZSTD_getFrameContentSize(blob, size);
+
+            if (content != ZSTD_CONTENTSIZE_ERROR && content != ZSTD_CONTENTSIZE_UNKNOWN)
+            {
+                row->data.resize(content);
+                auto const written = decompress_into(blob, size,
+                    row->data.data(), row->data.size());
+                row->data.resize(written);
+            }
         }
 
         row->chart_set   = chart_set;
@@ -566,6 +634,7 @@ namespace database
         if (!d) return;
 
         sqlite3_reset(d->stmt_lookup);
+        sqlite3_reset(d->stmt_fetch);
         sqlite3_reset(d->stmt_insert);
         sqlite3_reset(d->stmt_insert_orig);
         sqlite3_reset(d->stmt_delete_orig);

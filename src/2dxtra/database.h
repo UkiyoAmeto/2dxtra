@@ -16,7 +16,9 @@ namespace database
                        // 5=DP-to-SP, 6=DP-to-SP+All-Scratch,
                        // 7=DP-to-SP+Kichiku, 8=DP-to-SP+Kiraku,
                        // 9=DP-to-SP+Kichiku+All-Scratch,
-                       // 10=DP-to-SP+Kiraku+All-Scratch
+                       // 10=DP-to-SP+Kiraku+All-Scratch,
+                       // 11..14=LR2-Judge (Easy/Normal/Hard/V.Hard),
+                       // 15..18=Kichiku with LR2-Judge (Easy/Normal/Hard/V.Hard)
         int music_id;
         int difficulty; // 0..9 (loader chart index)
         std::string hash; // sha256 of the mutated chart (also its id)
@@ -51,6 +53,7 @@ namespace database
     auto open(const char* path) -> db*;
     auto close(db*) -> void;
     auto lookup(db*, int chart_set, int music_id, int difficulty, const std::string& orig_hash) -> std::optional<chart_row>;
+    auto fetch(db*, int chart_set, int music_id, int difficulty, const std::string& orig_hash) -> std::optional<chart_row>;
     auto insert(db*, const chart_row& row, const std::string& orig_hash) -> void;
     auto pull(db*, int chart_set, int music_id, int difficulty, std::uint8_t* dst, std::size_t capacity) -> std::optional<pulled_chart>;
     auto list_sets(db*) -> std::vector<std::pair<int, std::string>>;

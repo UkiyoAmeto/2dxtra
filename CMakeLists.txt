@@ -86,6 +86,7 @@ set(SOURCE_FILES
     src/2dxtra/features/scratch_swap.cc
     src/2dxtra/features/play_visuals.cc
     src/2dxtra/features/timing_modifier.cc
+    src/2dxtra/features/lr2_judge.cc
     src/2dxtra/features/fast_slow_display.cc
     src/2dxtra/features/timing_histogram.cc
     src/2dxtra/features/play_stats.cc
